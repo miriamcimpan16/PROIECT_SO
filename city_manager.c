@@ -8,6 +8,7 @@
 #include<sys/types.h>
 #include<time.h> //pentru time()
 #define MAX 100
+#define descr 256
 //stat(path,&struct_stat) --> 0 daca exista | -1 daca nu
 //open pentru creare de fisiere
 //structura pentru reports.dat
@@ -15,36 +16,64 @@ typedef struct report
 {
   int id;
   char nume[MAX];
-  float lat,log;
+  float lat,lon;
   char issue[MAX];
   int severity;
   time_t timestamp;
-  char description[MAX];
+  char description[descr];
 }report;
 //path-urile o sa le pun ca variabile globale
 char path_reports[MAX]="";
 char path_cfg[MAX]="";
 char path_log[MAX]="";
-void writing_in_reports(char district[])
+char role[MAX] = "";
+char user[MAX] = "";
+float lat = 0,lon = 0;
+int severity = 0;
+char description[descr] = "";
+char category[MAX] = "";
+char district[MAX] = "";
+void writing_in_reports(char district[],char role[],char user[])
 {
-  // trebuie sa verific cu st+mode si stat daca a permisiunea de scriere, nu stiu cum sa fac asta
   snprintf(path_reports,MAX,"%s/reports.dat",district);
-  int fd  = open(path_reports,O_WRONLY|O_APPEND|O_CREAT);
+  //verificarea daca owner are drept de scriere
+  struct stat st;
+  if(stat(path_reports,&st) == -1)
+    {
+      printf("eroare");
+      exit(EXIT_FAILURE);
+    }
+  if(strcmp(role,"manager") == 0){
+  if(!(st.st_mode & 0200))
+    {
+      printf("Manager ul nu are drept de scriere");
+      exit(EXIT_FAILURE);
+    }
+  }
+   if(strcmp(role,"inspector") == 0){
+  if(!(st.st_mode & 0020))
+    {
+      printf("Inspector ul nu are drept de scriere");
+      exit(EXIT_FAILURE);
+    }
+  }
+  int fd  = open(path_reports,O_WRONLY|O_APPEND);
   if(fd == -1)
     {
       printf("eroare la deschiderea fisierului");
       exit(EXIT_FAILURE);
     }
   report element;
-  element.id = 1;
-  strcpy(element.nume,"test");
-  element.lat = 5.4; element.log = 4.2;
-  strcpy(element.issue, "road");
-  element.severity = 2;
+  int nr_rapoarte = st.st_size / sizeof(report);
+  element.id = nr_rapoarte + 1; // cate rapoarte exista deja
+  strcpy(element.nume,user);
+  element.lat = lat; element.lon = lon;
+  strcpy(element.issue, category);
+  element.severity = severity;
   element.timestamp = time(NULL);
-  strcpy(element.description, "groapa mare in asfalt");
+  strcpy(element.description, description);
  
-		       if((write(fd,&element,sizeof(element)) == -1))
+  if((write(fd,&element,sizeof(element)) == -1))
      {
        printf("eroare la scriere");
        exit(EXIT_FAILURE);
@@ -59,9 +88,10 @@ void creare_reports(char district[])
   //CREARE FISIERULUI REPORTS.DAT
       
       snprintf(path_reports,MAX,"%s/reports.dat",district);
-      int fd = open(path_reports,O_CREAT | O_RDWR,0664);
+      int fd = open(path_reports,O_CREAT | O_RDWR|O_EXCL,0664);
       //O_CREAT-> spune daca fisierul exista sau nu, daca nu exista este create
       //O_RDWR->deschide fisierul pentru citire si pentru scriere
+      //O_EXCL -> esueaza daca fisierul exista deja
       if(fd == -1)
 	{
 	  printf("eroare la creare reports.dat");
@@ -102,7 +132,7 @@ void creare_logged(char district[])
         chmod(path_log, 0644);
   
 }
-void comanda_add(char district[])
+void comanda_add(char district[],char role[],char user[])
 {
   struct stat st;
   if(stat(district,&st) == -1)
@@ -120,6 +150,7 @@ void comanda_add(char district[])
       creare_reports(district);
       creare_district(district);
       creare_logged(district);
+      
     
       
       
@@ -129,26 +160,55 @@ void comanda_add(char district[])
     {
       printf("Directorul exista deja\n");
     }
-  writing_in_reports(district);
+  writing_in_reports(district,role,user);
+  //crearea legaturii
+  char symlink_path[MAX];
+  snprintf(symlink_path, MAX, "active_reports-%s", district);
+  struct stat lst;
+  if (lstat(symlink_path, &lst) == -1)  // doar dacă nu există deja
+    symlink(path_reports, symlink_path);
   
 }
 int main(int argc,char *argv[])
 {
   
+  char command[MAX] = "";
   for(int i = 0;i<argc;i++)
     {
-      if(strcmp(argv[i],"--add") == 0 && ((i+1) < argc))
+
+    if(strcmp(argv[i],"--role") == 0)
 	{
-	  if(argv[i+1] != NULL){ // verific daca utilizatorul nu a pus --add simplu, fara nimic dupa
-	    comanda_add(argv[i+1]);
-	    i++;//trecem la urm cuvant
-	  }
-	  else
-	    {
-	      printf("eroare la argument");
-	      exit(EXIT_FAILURE);
-	      
-	    }
+	  strcpy(role,argv[i+1]);
+	}
+    if (strcmp(argv[i], "--user") == 0)
+      {
+        strcpy(user, argv[i+1]);
+      }
+    if (strcmp(argv[i], "--lat") == 0)
+        lat = atof(argv[++i]);
+    if (strcmp(argv[i], "--lon") == 0)
+        lon = atof(argv[++i]);
+    if (strcmp(argv[i], "--category") == 0)
+        strcpy(category, argv[++i]);
+    if (strcmp(argv[i], "--severity") == 0)
+        severity = atoi(argv[++i]);
+    if (strcmp(argv[i], "--description") == 0)
+        strcpy(description, argv[++i]);
+     if(strcmp(argv[i],"--add") == 0)
+	{
+	  strcpy(district,argv[++i]);
+	   strcpy(command,"add");
+	  
+	 
+	}
+      
+    }
+   if(strlen(district) > 0)
+    {
+      if(strcmp(command,"add") == 0)
+	{
+	  comanda_add(district,role,user);
 	}
     }
+  return 0;
 }
