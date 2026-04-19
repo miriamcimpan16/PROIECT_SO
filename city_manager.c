@@ -8,6 +8,8 @@
 #include<sys/types.h>
 #include<time.h> //pentru time()
 #define MAX 100
+#define MAX_PATH 300 //pt caile fisierelor
+#define MAX_LOG 500 //pt liniile de log
 #define descr 256
 //stat(path,&struct_stat) --> 0 daca exista | -1 daca nu
 //open pentru creare de fisiere
@@ -23,9 +25,9 @@ typedef struct report
   char description[descr];
 }report;
 //path-urile o sa le pun ca variabile globale
-char path_reports[MAX]="";
-char path_cfg[MAX]="";
-char path_log[MAX]="";
+char path_reports[MAX_PATH]="";
+char path_cfg[MAX_PATH]="";
+char path_log[MAX_PATH]="";
 char role[MAX] = "";
 char user[MAX] = "";
 float lat = 0,lon = 0;
@@ -33,30 +35,60 @@ int severity = 0;
 char description[descr] = "";
 char category[MAX] = "";
 char district[MAX] = "";
-void writing_in_reports(char district[],char role[],char user[])
+//transformam bitii in text
+void mode_to_string(mode_t mode,char *str)
 {
-  snprintf(path_reports,MAX,"%s/reports.dat",district);
+  strcpy(str,"---------");
+  //pentru owner
+  if(mode & S_IRUSR) str[0] = 'r';
+  if(mode & S_IWUSR) str[1] = 'w';
+  if (mode & S_IXUSR) str[2] = 'x'; 
+  
+  //pentru group
+  if (mode & S_IRGRP) str[3] = 'r'; 
+  if (mode & S_IWGRP) str[4] = 'w'; 
+  if (mode & S_IXGRP) str[5] = 'x'; 
+  
+  //pentru others
+  if (mode & S_IROTH) str[6] = 'r'; 
+  if (mode & S_IWOTH) str[7] = 'w'; 
+  if (mode & S_IXOTH) str[8] = 'x'; 
+  
+  
+}
+int check_write_permission(const char *path, const char *role) {
+    struct stat st;
+    //in st se afla permisiuni,tip fisier,dimensiune
+    if(stat(path,&st) == -1){
+      return 1;//daca nu exista fisierul inca, va fi creat
+    }
+    
+    if(strcmp(role,"inspector") == 0)
+    {
+      if(st.st_mode & S_IWGRP) return 1; //luam doar bitii de care avem nevoie
+    }
+    if(strcmp(role,"manager") == 0)
+    {
+      if(st.st_mode & S_IRUSR) return 1;
+    }
+    return -1;
+   
+  
+}
+void writing_in_reports()
+{
+  snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
   //verificarea daca owner are drept de scriere
+  if(check_write_permission(path_reports,role) == -1)
+  {
+         printf("Rolul %s nu are permisiunea de a scrie in reports\n",role);
+         exit(EXIT_FAILURE);
+  }
   struct stat st;
-  if(stat(path_reports,&st) == -1)
-    {
-      printf("eroare");
-      exit(EXIT_FAILURE);
+  if (stat(path_reports, &st) == -1) {
+        perror("Eroare la obținerea dimensiunii fișierului");
+        exit(EXIT_FAILURE);
     }
-  if(strcmp(role,"manager") == 0){
-  if(!(st.st_mode & 0200))
-    {
-      printf("Manager ul nu are drept de scriere");
-      exit(EXIT_FAILURE);
-    }
-  }
-   if(strcmp(role,"inspector") == 0){
-  if(!(st.st_mode & 0020))
-    {
-      printf("Inspector ul nu are drept de scriere");
-      exit(EXIT_FAILURE);
-    }
-  }
   int fd  = open(path_reports,O_WRONLY|O_APPEND);
   if(fd == -1)
     {
@@ -64,8 +96,8 @@ void writing_in_reports(char district[],char role[],char user[])
       exit(EXIT_FAILURE);
     }
   report element;
-  int nr_rapoarte = st.st_size / sizeof(report);
-  element.id = nr_rapoarte + 1; // cate rapoarte exista deja
+  int nr_rapoarte = st.st_size / sizeof(report); //cate rapoarte exista deja
+  element.id = nr_rapoarte + 1; //noul id va fi urmatorul numar
   strcpy(element.nume,user);
   element.lat = lat; element.lon = lon;
   strcpy(element.issue, category);
@@ -82,38 +114,53 @@ void writing_in_reports(char district[],char role[],char user[])
   close(fd);
   
 }
+void writing_in_logged_district()
+{
+  
+  if(check_write_permission(path_log,role) == -1)
+  {
+    printf("Rolul %s nu are permisiunea de a scrie in logged_district\n",role);
+    exit(EXIT_FAILURE);
+  }
+  int fd_log = open(path_log, O_WRONLY | O_APPEND);
+  char log_entry[MAX_LOG];
+  time_t now = time(NULL);
+  snprintf(log_entry, MAX_LOG, "[%s] role=%s user=%s action=add\n", 
+  ctime(&now), role, user); 
+  write(fd_log, log_entry, strlen(log_entry));
+  close(fd_log);
+}
 void creare_reports(char district[])
 {
   
   //CREARE FISIERULUI REPORTS.DAT
       
-      snprintf(path_reports,MAX,"%s/reports.dat",district);
-      int fd = open(path_reports,O_CREAT | O_RDWR|O_EXCL,0664);
-      //O_CREAT-> spune daca fisierul exista sau nu, daca nu exista este create
-      //O_RDWR->deschide fisierul pentru citire si pentru scriere
-      //O_EXCL -> esueaza daca fisierul exista deja
-      if(fd == -1)
+    snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
+    int fd = open(path_reports,O_CREAT | O_RDWR,0664);
+    //O_CREAT-> spune daca fisierul exista sau nu, daca nu exista este create
+    //O_RDWR->deschide fisierul pentru citire si pentru scriere
+    if(fd == -1)
 	{
 	  printf("eroare la creare reports.dat");
 	  exit(EXIT_FAILURE);
 	}
-      close(fd);
-      chmod(path_reports,0664); // pun permsiunile inca odata, desi le am pus la open, pt sigurata,deoarece pot fi modificate de catre sistem
+  close(fd);
+  chmod(path_reports,0664); // pun permsiunile inca odata, desi le am pus la open, pt sigurata,deoarece pot fi modificate de catre sistem
  
 }
 void creare_district(char district[])
 {
  
-  //CREAREA FISIERULUI DISTRICT.CFG
+    //CREAREA FISIERULUI DISTRICT.CFG
       
-      snprintf(path_cfg, MAX, "%s/district.cfg", district); 
-      int fd = open(path_cfg, O_CREAT | O_RDWR, 0640);
-      if(fd == -1) {
-	perror("eroare la creare district.cfg"); 
-	exit(EXIT_FAILURE);
-      }
-      close(fd);
-      chmod(path_cfg, 0640);
+    snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district); 
+    int fd = open(path_cfg, O_CREAT | O_RDWR, 0640);
+    if(fd == -1) {
+	    perror("eroare la creare district.cfg"); 
+	    exit(EXIT_FAILURE);
+    }
+    close(fd);
+    chmod(path_cfg, 0640);
  
 }
 void creare_logged(char district[])
@@ -121,15 +168,48 @@ void creare_logged(char district[])
  
     //CREAREA FISIERULUI LOGGED_DISTRICT
       
-      snprintf(path_log, MAX, "%s/logged_district", district);
-      int fd = open(path_log, O_CREAT | O_RDWR, 0644);
-        if (fd == -1)
+    snprintf(path_log, MAX_PATH, "%s/logged_district", district);
+    int fd = open(path_log, O_CREAT | O_RDWR, 0644);
+    if (fd == -1)
         {
             perror("eroare la creare logged_district");
             exit(EXIT_FAILURE);
         }
-        close(fd);
-        chmod(path_log, 0644);
+    close(fd);
+    chmod(path_log, 0644);
+  
+}
+void creating_the_link()
+{
+  //cream numele legaturii
+  char symlink_path[MAX_PATH];
+  snprintf(symlink_path,MAX_PATH,"active_reports-%s",district);
+  struct stat lst;
+  struct stat target_st;
+  //verificam cu lstat() daca leg simbolica exista
+  if(lstat(symlink_path,&lst) == 0)
+  {
+    //daca am ajuns aici, exista
+    //cu stat verificam daca destinatia ei exista
+    if(stat(symlink_path,&target_st) == -1)
+    {
+      //destinatia nu mai exista
+      unlink(symlink_path); //stergem legatura si apoi o refacem
+      if(symlink(path_reports,symlink_path) == -1)
+      {
+        printf("eroare la recrearea legaturii simbolice");
+        exit(EXIT_FAILURE);
+      }
+    }
+  }
+    else{
+      //daca am ajuns aici, legatura nu exista deloc
+      if(symlink(path_reports,symlink_path) == -1)
+      {
+        printf("eroare la crearea legaturii simbolice");
+      }
+    }
+  
   
 }
 void comanda_add(char district[],char role[],char user[])
@@ -143,31 +223,27 @@ void comanda_add(char district[],char role[],char user[])
 	  printf("eroare la crearea dosarului");
 	  exit(EXIT_FAILURE);
 	}
+  chmod(district,0750);
       
 	//district/reports.dat
 	//district/district.cfg
 	//district/logged_district
-      creare_reports(district);
-      creare_district(district);
-      creare_logged(district);
-      
-    
-      
-      
-      
+    creare_reports(district);
+    creare_district(district);
+    creare_logged(district);
     }
   else
     {
       printf("Directorul exista deja\n");
     }
-  writing_in_reports(district,role,user);
-  //crearea legaturii
-  char symlink_path[MAX];
-  snprintf(symlink_path, MAX, "active_reports-%s", district);
-  struct stat lst;
-  if (lstat(symlink_path, &lst) == -1)  // doar dacă nu există deja
-    symlink(path_reports, symlink_path);
+  writing_in_logged_district();//inregistrez actiunea
+  writing_in_reports();
+  creating_the_link();
   
+}
+void comanda_list()
+{
+     
 }
 int main(int argc,char *argv[])
 {
@@ -175,7 +251,7 @@ int main(int argc,char *argv[])
   char command[MAX] = "";
   for(int i = 0;i<argc;i++)
     {
-
+      if((i+1) < argc){
     if(strcmp(argv[i],"--role") == 0)
 	{
 	  strcpy(role,argv[i+1]);
@@ -201,6 +277,12 @@ int main(int argc,char *argv[])
 	  
 	 
 	}
+  if(strcmp(argv[i],"--list") == 0)
+  {
+     strcpy(district,argv[++i]);
+	   strcpy(command,"list");
+  }
+      }
       
     }
    if(strlen(district) > 0)
@@ -210,5 +292,6 @@ int main(int argc,char *argv[])
 	  comanda_add(district,role,user);
 	}
     }
+
   return 0;
 }
