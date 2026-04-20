@@ -56,6 +56,13 @@ void mode_to_string(mode_t mode,char *str)
   
   
 }
+void format_time(time_t t,char *buf,size_t len)
+{
+  //pentru a transforma variabila timp intr o data pe an luna zi ora minut..
+  struct tm *tm_info = localtime(&t);
+  //formateaza intr un string care nu depaseste len
+  strftime(buf,len,"%Y-%m-%d %H:%M:%S",tm_info);
+}
 int check_write_permission(const char *path, const char *role) {
     struct stat st;
     //in st se afla permisiuni,tip fisier,dimensiune
@@ -122,13 +129,17 @@ void writing_in_logged_district()
     printf("Rolul %s nu are permisiunea de a scrie in logged_district\n",role);
     exit(EXIT_FAILURE);
   }
+  //deschid fisierul pt a putea scrie in el
   int fd_log = open(path_log, O_WRONLY | O_APPEND);
-  char log_entry[MAX_LOG];
-  time_t now = time(NULL);
-  snprintf(log_entry, MAX_LOG, "[%s] role=%s user=%s action=add\n", 
-  ctime(&now), role, user); 
-  write(fd_log, log_entry, strlen(log_entry));
+  char log_entry[MAX_LOG];//ce va aparea in prop finala
+  time_t now = time(NULL); //timpul curent 
+  char time_str[64];//string ul cu formatul timpului
+  format_time(now,time_str,sizeof(time_str)); 
+  snprintf(log_entry,MAX_LOG,"[%s] role = %s user = %s action = add\n"
+  ,time_str,role,user);
+  write(fd_log,log_entry,strlen(log_entry));
   close(fd_log);
+
 }
 void creare_reports(char district[])
 {
@@ -241,9 +252,25 @@ void comanda_add(char district[],char role[],char user[])
   creating_the_link();
   
 }
+
 void comanda_list()
-{
-     
+{ 
+     struct stat st;
+     char perm_str[MAX];
+     //extragerea datelor
+     if(stat(path_reports,&st) == -1)
+     {
+      printf("eroare la citirea datelor");
+      exit(EXIT_FAILURE);
+     }
+     mode_to_string(st.st_mode,perm_str);
+     //ultima modificare
+     char time_str[64];
+     format_time(st.st_mtime,time_str,sizeof(time_str));
+     printf("FISIER: %s\nPERMISIUNI: %s\nDIMENSIUNE: %ld bytes\nULTIMA MODIFICARE: %s",
+    path_reports,perm_str,st.st_size,time_str
+    );
+
 }
 int main(int argc,char *argv[])
 {
@@ -285,12 +312,19 @@ int main(int argc,char *argv[])
       }
       
     }
+  snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
+  snprintf(path_log, MAX_PATH, "%s/logged_district", district);
+  snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district);
    if(strlen(district) > 0)
     {
       if(strcmp(command,"add") == 0)
 	{
 	  comanda_add(district,role,user);
 	}
+  if(strcmp(command,"list") == 0)
+  {
+    comanda_list();
+  }
     }
 
   return 0;
