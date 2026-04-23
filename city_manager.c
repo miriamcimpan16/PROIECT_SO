@@ -32,10 +32,26 @@ char role[MAX] = "";
 char user[MAX] = "";
 float lat = 0,lon = 0;
 int severity = 0;
+int id = 0,id_cautat = 0;
 char description[descr] = "";
 char category[MAX] = "";
 char district[MAX] = "";
-//transformam bitii in text
+int has_permission(mode_t mode,const char *role,char type)
+{
+  if(strcmp(role,"manager") == 0)
+    {
+      if (type == 'r') return mode & S_IRUSR;
+      if (type == 'w') return mode & S_IWUSR;
+      if (type == 'x') return mode & S_IXUSR;
+    }
+  if (strcmp(role, "inspector") == 0) {
+        if (type == 'r') return mode & S_IRGRP;
+        if (type == 'w') return mode & S_IWGRP;
+        if (type == 'x') return mode & S_IXGRP;
+    }
+  return 0;
+}
+//transformarea bitilor in text
 void mode_to_string(mode_t mode,char *str)
 {
   strcpy(str,"---------");
@@ -53,7 +69,7 @@ void mode_to_string(mode_t mode,char *str)
   if (mode & S_IROTH) str[6] = 'r'; 
   if (mode & S_IWOTH) str[7] = 'w'; 
   if (mode & S_IXOTH) str[8] = 'x'; 
-  
+  str[9] = '\0';
   
 }
 void format_time(time_t t,char *buf,size_t len)
@@ -63,43 +79,46 @@ void format_time(time_t t,char *buf,size_t len)
   //formateaza intr un string care nu depaseste len
   strftime(buf,len,"%Y-%m-%d %H:%M:%S",tm_info);
 }
-int check_write_permission(const char *path, const char *role) {
+void check_write_permission(const char *path, const char *role) {
     struct stat st;
     //in st se afla permisiuni,tip fisier,dimensiune
-    if(stat(path,&st) == -1){
-      return 1;//daca nu exista fisierul inca, va fi creat
+    if (stat(path, &st) == -1) {
+        perror("Eroare stat");
+        exit(EXIT_FAILURE);
     }
-    
-    if(strcmp(role,"inspector") == 0)
-    {
-      if(st.st_mode & S_IWGRP) return 1; //luam doar bitii de care avem nevoie
-    }
-    if(strcmp(role,"manager") == 0)
-    {
-      if(st.st_mode & S_IRUSR) return 1;
-    }
-    return -1;
-   
-  
+    if(!has_permission(st.st_mode,role,'w'))
+      {
+	printf("Rolul %s nu are permisiunea de scriere in fisier\n",role);
+	exit(EXIT_FAILURE);
+      }
+}
+void check_read_permission(const char *path,const char *role)
+{
+  struct stat st;
+  if(stat(path,&st) == -1){
+    printf("eroare la citire");
+    exit(EXIT_FAILURE);
+  }
+  if(!has_permission(st.st_mode,role,'r'))
+  {
+    printf("Rolul %s nu are permisiunea de citire in fisier\n",role);
+    exit(EXIT_FAILURE);
+  }
 }
 void writing_in_reports()
 {
   snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
   //verificarea daca owner are drept de scriere
-  if(check_write_permission(path_reports,role) == -1)
-  {
-         printf("Rolul %s nu are permisiunea de a scrie in reports\n",role);
-         exit(EXIT_FAILURE);
-  }
+  check_write_permission(path_reports,role);
   struct stat st;
   if (stat(path_reports, &st) == -1) {
-        perror("Eroare la obținerea dimensiunii fișierului");
+        perror("Eroare la obținerea dimensiunii fișierului\n");
         exit(EXIT_FAILURE);
     }
   int fd  = open(path_reports,O_WRONLY|O_APPEND);
   if(fd == -1)
     {
-      printf("eroare la deschiderea fisierului");
+      printf("Eroare la deschiderea fisierului\n");
       exit(EXIT_FAILURE);
     }
   report element;
@@ -114,7 +133,7 @@ void writing_in_reports()
  
   if((write(fd,&element,sizeof(element)) == -1))
      {
-       printf("eroare la scriere");
+       printf("Eroare la scrierea in fisier\n");
        exit(EXIT_FAILURE);
 			   
      }
@@ -124,11 +143,7 @@ void writing_in_reports()
 void writing_in_logged_district()
 {
   
-  if(check_write_permission(path_log,role) == -1)
-  {
-    printf("Rolul %s nu are permisiunea de a scrie in logged_district\n",role);
-    exit(EXIT_FAILURE);
-  }
+  check_write_permission(path_log,role);
   //deschid fisierul pt a putea scrie in el
   int fd_log = open(path_log, O_WRONLY | O_APPEND);
   char log_entry[MAX_LOG];//ce va aparea in prop finala
@@ -146,13 +161,14 @@ void creare_reports(char district[])
   
   //CREARE FISIERULUI REPORTS.DAT
       
-    snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
-    int fd = open(path_reports,O_CREAT | O_RDWR,0664);
-    //O_CREAT-> spune daca fisierul exista sau nu, daca nu exista este create
-    //O_RDWR->deschide fisierul pentru citire si pentru scriere
-    if(fd == -1)
+  snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
+  int fd = open(path_reports,O_CREAT | O_RDWR|O_EXCL,0664);
+      //O_CREAT-> spune daca fisierul exista sau nu, daca nu exista este create
+      //O_RDWR->deschide fisierul pentru citire si pentru scriere
+      //O_EXCL -> esueaza daca fisierul exista deja
+  if(fd == -1)
 	{
-	  printf("eroare la creare reports.dat");
+	  printf("Eroare la crearea fisierului reports.dat\n");
 	  exit(EXIT_FAILURE);
 	}
   close(fd);
@@ -162,16 +178,16 @@ void creare_reports(char district[])
 void creare_district(char district[])
 {
  
-    //CREAREA FISIERULUI DISTRICT.CFG
+  //CREAREA FISIERULUI DISTRICT.CFG
       
-    snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district); 
-    int fd = open(path_cfg, O_CREAT | O_RDWR, 0640);
-    if(fd == -1) {
-	    perror("eroare la creare district.cfg"); 
-	    exit(EXIT_FAILURE);
-    }
-    close(fd);
-    chmod(path_cfg, 0640);
+  snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district); 
+  int fd = open(path_cfg, O_CREAT | O_RDWR, 0640);
+  if(fd == -1) {
+	printf("Eroare la crearea district.cfg\n"); 
+	exit(EXIT_FAILURE);
+      }
+      close(fd);
+      chmod(path_cfg, 0640);
  
 }
 void creare_logged(char district[])
@@ -179,15 +195,15 @@ void creare_logged(char district[])
  
     //CREAREA FISIERULUI LOGGED_DISTRICT
       
-    snprintf(path_log, MAX_PATH, "%s/logged_district", district);
-    int fd = open(path_log, O_CREAT | O_RDWR, 0644);
-    if (fd == -1)
-        {
-            perror("eroare la creare logged_district");
-            exit(EXIT_FAILURE);
-        }
-    close(fd);
-    chmod(path_log, 0644);
+  snprintf(path_log, MAX_PATH, "%s/logged_district", district);
+  int fd = open(path_log, O_CREAT | O_RDWR, 0644);
+  if (fd == -1)
+    {
+      printf("Eroare la crearea fisierului logged_district");
+      exit(EXIT_FAILURE);
+    }
+  close(fd);
+  chmod(path_log, 0644);
   
 }
 void creating_the_link()
@@ -208,7 +224,7 @@ void creating_the_link()
       unlink(symlink_path); //stergem legatura si apoi o refacem
       if(symlink(path_reports,symlink_path) == -1)
       {
-        printf("eroare la recrearea legaturii simbolice");
+        printf("Eroare la recrearea legaturii simbolice\n");
         exit(EXIT_FAILURE);
       }
     }
@@ -217,7 +233,7 @@ void creating_the_link()
       //daca am ajuns aici, legatura nu exista deloc
       if(symlink(path_reports,symlink_path) == -1)
       {
-        printf("eroare la crearea legaturii simbolice");
+        printf("Eroare la crearea legaturii simbolice\n");
       }
     }
   
@@ -231,33 +247,60 @@ void comanda_add(char district[],char role[],char user[])
       //folderul-->cu permisiunile: 0750
       if((mkdir(district,0750)) == -1)
 	{
-	  printf("eroare la crearea dosarului");
+	  printf("Eroare la crearea dosarului\n");
 	  exit(EXIT_FAILURE);
 	}
-  chmod(district,0750);
-      
+  chmod(district,0750);  
 	//district/reports.dat
 	//district/district.cfg
 	//district/logged_district
-    creare_reports(district);
-    creare_district(district);
-    creare_logged(district);
-    }
-  else
-    {
-      printf("Directorul exista deja\n");
-    }
+  creare_reports(district);
+  creare_district(district);
+  creare_logged(district);
+  }
   writing_in_logged_district();//inregistrez actiunea
   writing_in_reports();
   creating_the_link();
-  
 }
-
+void comanda_view(int id)
+{
+  check_read_permission(path_reports,role);
+  //deschid fisierul doar pt citire->O_RDONLY
+  int fd = open(path_reports,O_RDONLY);
+  if(fd == -1)
+  {
+    printf("Eroare la deschiderea fisierului\n");
+    exit(EXIT_FAILURE);
+  }
+  report element;
+  int gasit = 0;
+  while(read(fd,&element,sizeof(report)) > 0)
+  {
+    if(element.id == id)
+    {
+      //pt a converti time_t in string
+      char *time_str = ctime(&element.timestamp);
+      printf("--- Detalii Raport ID: %d ---\n", element.id);
+      printf("Inspector: %s\n", element.nume);
+      printf("Coordonate: GPS(%.4f, %.4f)\n", element.lat, element.lon);
+      printf("Categorie: %s\n", element.issue);
+      printf("Severitate: %d\n", element.severity);
+      printf("Descriere: %s\n", element.description);
+      printf("Adaugat la: %s", time_str);
+      gasit = 1;
+      break;
+    }
+  }
+  if(!gasit){
+    printf("Raportul cu ID %d nu a fost gasit in districtul %s.\n", id, district);
+  }
+}
 void comanda_list()
 { 
      struct stat st;
      char perm_str[MAX];
      //extragerea datelor
+     check_read_permission(path_reports,role);
      if(stat(path_reports,&st) == -1)
      {
       printf("eroare la citirea datelor");
@@ -267,9 +310,27 @@ void comanda_list()
      //ultima modificare
      char time_str[64];
      format_time(st.st_mtime,time_str,sizeof(time_str));
-     printf("FISIER: %s\nPERMISIUNI: %s\nDIMENSIUNE: %ld bytes\nULTIMA MODIFICARE: %s",
+     printf("FISIER: %s\nPERMISIUNI: %s\nDIMENSIUNE: %ld bytes\nULTIMA MODIFICARE: %s\n",
     path_reports,perm_str,st.st_size,time_str
     );
+    //citirea rapoartelor
+    int fd = open(path_reports, O_RDONLY);
+     if(fd == -1) {
+         perror("Eroare la deschidere reports.dat");
+         exit(EXIT_FAILURE);
+     }
+     report element;
+     int count = 0;
+     while(read(fd, &element, sizeof(report)) > 0) {
+         printf("ID: %d | Cat: %s | Sev: %d | Inspector: %s\n", element.id, element.issue, element.severity, element.nume);
+         count++;
+     }
+     
+     if(count == 0) {
+         printf("Niciun raport gasit in acest district.\n");
+     }
+
+     close(fd);
 
 }
 int main(int argc,char *argv[])
@@ -278,11 +339,11 @@ int main(int argc,char *argv[])
   char command[MAX] = "";
   for(int i = 0;i<argc;i++)
     {
-      if((i+1) < argc){
+  if((i+1) < argc){
     if(strcmp(argv[i],"--role") == 0)
-	{
+	  {
 	  strcpy(role,argv[i+1]);
-	}
+	  }
     if (strcmp(argv[i], "--user") == 0)
       {
         strcpy(user, argv[i+1]);
@@ -297,35 +358,42 @@ int main(int argc,char *argv[])
         severity = atoi(argv[++i]);
     if (strcmp(argv[i], "--description") == 0)
         strcpy(description, argv[++i]);
-     if(strcmp(argv[i],"--add") == 0)
-	{
-	  strcpy(district,argv[++i]);
-	   strcpy(command,"add");
-	  
-	 
-	}
-  if(strcmp(argv[i],"--list") == 0)
+    if(strcmp(argv[i],"--add") == 0)
+	 {
+	    strcpy(district,argv[++i]);
+	  strcpy(command,"add");
+	 }
+   if(strcmp(argv[i],"--list") == 0)
   {
-     strcpy(district,argv[++i]);
-	   strcpy(command,"list");
+    strcpy(district, argv[++i]);
+    strcpy(command, "list");
   }
-      }
+  if(strcmp(argv[i],"--view") == 0)
+  {
+    strcpy(district, argv[++i]);
+    id_cautat = atoi(argv[++i]);
+    strcpy(command, "view");
+  }
       
-    }
-  snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
-  snprintf(path_log, MAX_PATH, "%s/logged_district", district);
-  snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district);
+  }
+}
+snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
+snprintf(path_log, MAX_PATH, "%s/logged_district", district);
+snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district);
    if(strlen(district) > 0)
     {
       if(strcmp(command,"add") == 0)
 	{
 	  comanda_add(district,role,user);
 	}
+  if(strcmp(command,"view") == 0)
+  {
+    comanda_view(id_cautat);
+  }
   if(strcmp(command,"list") == 0)
   {
     comanda_list();
   }
     }
-
   return 0;
 }
