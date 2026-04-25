@@ -25,13 +25,14 @@ typedef struct report
   char description[descr];
 }report;
 //path-urile o sa le pun ca variabile globale
+char command[MAX] = "";
 char path_reports[MAX_PATH]="";
 char path_cfg[MAX_PATH]="";
 char path_log[MAX_PATH]="";
 char role[MAX] = "";
 char user[MAX] = "";
 float lat = 0,lon = 0;
-int severity = 0;
+int severity = 0,severity_update = 0;
 int id = 0,id_cautat = 0;
 char description[descr] = "";
 char category[MAX] = "";
@@ -143,15 +144,20 @@ void writing_in_reports()
 void writing_in_logged_district()
 {
   
-  check_write_permission(path_log,role);
+  
   //deschid fisierul pt a putea scrie in el
   int fd_log = open(path_log, O_WRONLY | O_APPEND);
+  if(fd_log == -1)
+  {
+    printf("Eroare la deschiderea log\n");
+    exit(EXIT_FAILURE);
+  }
   char log_entry[MAX_LOG];//ce va aparea in prop finala
   time_t now = time(NULL); //timpul curent 
   char time_str[64];//string ul cu formatul timpului
   format_time(now,time_str,sizeof(time_str)); 
-  snprintf(log_entry,MAX_LOG,"[%s] role = %s user = %s action = add\n"
-  ,time_str,role,user);
+  snprintf(log_entry,MAX_LOG,"[%s] role = %s user = %s action = %s\n"
+  ,time_str,role,user,command);
   write(fd_log,log_entry,strlen(log_entry));
   close(fd_log);
 
@@ -250,18 +256,27 @@ void comanda_add(char district[],char role[],char user[])
 	  printf("Eroare la crearea dosarului\n");
 	  exit(EXIT_FAILURE);
 	}
-  chmod(district,0750);  
+  chmod(district,0750);
+  } 
+  //verificam fiecare fisier daca este creat sau nu
+  if(stat(path_reports, &st) == -1) {
+      creare_reports(district);
+  }
+  if(stat(path_cfg, &st) == -1) {
+      creare_district(district);
+  }
+  if(stat(path_log, &st) == -1) {
+      creare_logged(district);
+  }
 	//district/reports.dat
 	//district/district.cfg
 	//district/logged_district
-  creare_reports(district);
-  creare_district(district);
-  creare_logged(district);
-  }
-  writing_in_logged_district();//inregistrez actiunea
+  //acum ca am verificat daca a fost creat
+  //fiecare fisier pot sa scriu in reports
   writing_in_reports();
   creating_the_link();
 }
+
 void comanda_view(int id)
 {
   check_read_permission(path_reports,role);
@@ -291,9 +306,11 @@ void comanda_view(int id)
       break;
     }
   }
+  close(fd);
   if(!gasit){
     printf("Raportul cu ID %d nu a fost gasit in districtul %s.\n", id, district);
   }
+
 }
 void comanda_list()
 { 
@@ -333,20 +350,124 @@ void comanda_list()
      close(fd);
 
 }
+void comanda_remove()
+{
+  check_write_permission(path_reports,role);
+  if(strcmp(role,"manager") != 0)
+  {
+    printf("Only the manager can remove a report");
+    exit(EXIT_FAILURE);
+  }
+  int fd = open(path_reports,O_RDWR);
+  if(fd == -1)
+  {
+    printf("eroare la deschiderea fisierului in functia remove\n");
+    exit(EXIT_FAILURE);
+  }
+  //numarul total de rapoarte
+  struct stat st;
+  stat(path_reports,&st);
+  int total = st.st_size/sizeof(report);
+
+  report element;
+  int i = 0;
+  int target = -1;
+
+  while(read(fd,&element,sizeof(report)) > 0)
+  {
+    if(element.id == id_cautat)
+    {
+      target = i;
+      break;
+    }
+    i++;
+  }
+  if(target == -1)
+  {
+    printf("Raportul cu ID %d nu a fost gasit.\n", id_cautat);
+    close(fd);
+    return;
+  }
+  //shiftam fiecare raport
+  report buffer;
+  for(int j = target; j < total - 1; j++)
+  {
+    
+    lseek(fd, (j+1) * sizeof(report), SEEK_SET);
+    read(fd, &buffer, sizeof(report));
+
+    lseek(fd, j * sizeof(report), SEEK_SET);
+    write(fd, &buffer, sizeof(report));
+  }
+  ftruncate(fd, (total - 1) * sizeof(report));
+  report r;
+  //pentru a modifica si id urile
+  for(int k = 0; k < total - 1; k++)
+  {
+    lseek(fd, k * sizeof(report), SEEK_SET);
+    read(fd, &r, sizeof(report));
+    r.id = k + 1;
+    lseek(fd, k * sizeof(report), SEEK_SET);
+    write(fd, &r, sizeof(report));
+  }
+  close(fd);
+  printf("Raportul cu ID %d a fost sters.\n", id_cautat);
+  
+
+}
+void comanda_update_threshold()
+{
+  if(strcmp(role,"manager") != 0)
+  {
+    printf("Only the manager can update");
+    exit(EXIT_FAILURE);
+  }
+  struct stat st;
+  if(stat(path_cfg,&st) == -1)
+  {
+    printf("eroare la stat district.cfg");
+    exit(EXIT_FAILURE);
+  }
+  if((st.st_mode & 0777) != 0640)
+  {
+    printf("the permissions are not correct");
+    exit(EXIT_FAILURE);
+
+  }
+  
+  //deschidem cfg pt scris
+  int fd = open(path_cfg,O_WRONLY|O_TRUNC);
+  if(fd == -1)
+  {
+    printf("eroare la deschiderea fisierului in functia update\n");
+    exit(EXIT_FAILURE);
+  }
+  char buf[64];
+  int len = snprintf(buf,sizeof(buf),"severity_threshold=%d\n",severity_update);
+  if(write(fd,buf,len) == -1)
+  {
+    printf("eroare in scrierea in district.cfg\n");
+    close(fd);
+    exit(EXIT_FAILURE);
+  }
+  close(fd);
+   printf("Threshold for district %s updated to %d\n", district, severity_update);
+}
 int main(int argc,char *argv[])
 {
   
-  char command[MAX] = "";
   for(int i = 0;i<argc;i++)
     {
   if((i+1) < argc){
     if(strcmp(argv[i],"--role") == 0)
 	  {
-	  strcpy(role,argv[i+1]);
+	     strncpy(role, argv[++i], MAX-1);
+       role[MAX-1] = '\0';
 	  }
     if (strcmp(argv[i], "--user") == 0)
       {
-        strcpy(user, argv[i+1]);
+        strncpy(user, argv[++i], MAX-1);
+        user[MAX-1] = '\0';
       }
     if (strcmp(argv[i], "--lat") == 0)
         lat = atof(argv[++i]);
@@ -374,13 +495,26 @@ int main(int argc,char *argv[])
     id_cautat = atoi(argv[++i]);
     strcpy(command, "view");
   }
+  if(strcmp(argv[i],"--remove_report") == 0)
+  {
+    strcpy(district,argv[++i]);
+    id_cautat = atoi(argv[++i]);
+    strcpy(command,"remove_report");
+  }
+  if(strcmp(argv[i],"--update_threshold") == 0)
+  {
+    strcpy(district,argv[++i]);
+    severity_update = atoi(argv[++i]);
+    strcpy(command,"update_threshold");
+    
+  }
       
   }
 }
 snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
 snprintf(path_log, MAX_PATH, "%s/logged_district", district);
 snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district);
-   if(strlen(district) > 0)
+if(strlen(district) > 0 && strlen(command) > 0)
     {
       if(strcmp(command,"add") == 0)
 	{
@@ -394,6 +528,16 @@ snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district);
   {
     comanda_list();
   }
-    }
+  if(strcmp(command,"remove_report") == 0)
+  {
+   comanda_remove();
+  }
+  if(strcmp(command,"update_threshold") == 0)
+  {
+    comanda_update_threshold();
+  }
+   writing_in_logged_district();
+  }
+  
   return 0;
 }
