@@ -31,6 +31,7 @@ char path_cfg[MAX_PATH]="";
 char path_log[MAX_PATH]="";
 char role[MAX] = "";
 char user[MAX] = "";
+char input[MAX] = "";
 float lat = 0,lon = 0;
 int severity = 0,severity_update = 0;
 int id = 0,id_cautat = 0;
@@ -453,6 +454,128 @@ void comanda_update_threshold()
   close(fd);
    printf("Threshold for district %s updated to %d\n", district, severity_update);
 }
+int parse_condition(const char *input, char *field, char *op, char *value) {
+    // Curatam variabilele
+    field[0] = '\0'; op[0] = '\0'; value[0] = '\0';
+    
+    char buffer[256];
+    strncpy(buffer, input, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+
+    // Cautam prima aparitie a ':'
+    char *colon1 = strchr(buffer, ':');
+    if (!colon1) return 0;
+    
+    *colon1 = '\0'; // Spargem string-ul in doua temporar
+    strcpy(field, buffer);
+    
+    // Pointer la partea cu operator si valoare
+    char *rest = colon1 + 1; 
+    
+    // Cautam a doua aparitie a ':' in 'rest'
+    char *colon2 = strchr(rest, ':');
+    if (!colon2) return 0;
+    
+    *colon2 = '\0';
+    strcpy(op, rest);
+    
+    // Corectie operator
+    if(strcmp(op, "=") == 0) {
+        strcpy(op, "==");
+    }
+    
+    // Tot ce ramane e valoarea
+    strcpy(value, colon2 + 1);
+
+    return 1;
+}
+int match_condition(report *r, const char *field, const char *op, const char *value) {
+
+    // ── SEVERITY (int) ─────────────────────────────────────────────
+    if (strcmp(field, "severity") == 0) {
+        int v = atoi(value);
+        if (strcmp(op, "==")  == 0) return r->severity == v;
+        if (strcmp(op, "!=") == 0) return r->severity != v;
+        if (strcmp(op, ">")  == 0) return r->severity >  v;
+        if (strcmp(op, "<")  == 0) return r->severity <  v;
+        if (strcmp(op, ">=") == 0) return r->severity >= v;
+        if (strcmp(op, "<=") == 0) return r->severity <= v;
+    }
+
+    // ── CATEGORY (string → r->issue) ───────────────────────────────
+    if (strcmp(field, "category") == 0) {
+        int cmp = strcmp(r->issue, value);
+        if (strcmp(op, "==")  == 0) return cmp == 0;
+        if (strcmp(op, "!=") == 0) return cmp != 0;
+    }
+
+    // ── INSPECTOR (string → r->nume) ───────────────────────────────
+    if (strcmp(field, "inspector") == 0) {
+        int cmp = strcmp(r->nume, value);
+        if (strcmp(op, "==")  == 0) return cmp == 0;
+        if (strcmp(op, "!=") == 0) return cmp != 0;
+    }
+
+    // ── TIMESTAMP (time_t → long) ──────────────────────────────────
+    if (strcmp(field, "timestamp") == 0) {
+        time_t v = (time_t)atol(value);
+        if (strcmp(op, "==")  == 0) return r->timestamp == v;
+        if (strcmp(op, "!=") == 0) return r->timestamp != v;
+        if (strcmp(op, ">")  == 0) return r->timestamp >  v;
+        if (strcmp(op, "<")  == 0) return r->timestamp <  v;
+        if (strcmp(op, ">=") == 0) return r->timestamp >= v;
+        if (strcmp(op, "<=") == 0) return r->timestamp <= v;
+    }
+
+    return 0;
+}
+typedef struct condition
+{
+  char field[MAX],op[10],value[MAX];
+}condition;
+void comanda_filter(char input[])
+{
+  int fd = open(path_reports,O_RDONLY);
+  if(fd == -1)
+  {
+    printf("eroare la deschiderea fisierului in functia filter\n");
+    exit(EXIT_FAILURE);
+  }
+  
+  char *token1 = strtok(input," ");
+  condition conditions[MAX];
+  int index = 0;
+  
+  while(token1 != NULL){
+  parse_condition(token1,conditions[index].field,conditions[index].op,conditions[index].value);
+  index++;
+  token1 = strtok(NULL," ");
+  }
+
+  
+  report element;
+  printf("Elementele care respecta conditia:\n");
+ 
+  while(read(fd,&element,sizeof(report)) > 0)
+  {
+    int true_false = 1;
+   for(int i = 0;i<index;i++)
+   {
+    if(!match_condition(&element,conditions[i].field,
+    conditions[i].op,conditions[i].value))
+    {
+      true_false = 0;
+      break;
+    }
+   
+   }
+    if(true_false)
+    {
+      comanda_view(element.id);
+    }
+  }
+  close(fd);
+}
 int main(int argc,char *argv[])
 {
   
@@ -508,6 +631,16 @@ int main(int argc,char *argv[])
     strcpy(command,"update_threshold");
     
   }
+   if((strcmp(argv[i],"--filter") == 0) && i+2<argc)
+  {
+   strcpy(district, argv[i+1]);
+   strncpy(input, argv[i+2], sizeof(input) - 1);
+   input[sizeof(input) - 1] = '\0'; // Siguranta ca se termina in NULL
+   strcpy(command, "filter");
+   i += 2; // Sarim manual peste cele doua argumente consumate
+    
+  }
+  
       
   }
 }
@@ -535,6 +668,10 @@ if(strlen(district) > 0 && strlen(command) > 0)
   if(strcmp(command,"update_threshold") == 0)
   {
     comanda_update_threshold();
+  }
+  if(strcmp(command,"filter") == 0)
+  {
+      comanda_filter(input);
   }
    writing_in_logged_district();
   }
