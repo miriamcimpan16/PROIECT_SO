@@ -10,6 +10,7 @@
 #define MAX 100
 #define MAX_PATH 300 //pt caile fisierelor
 #define MAX_LOG 500 //pt liniile de log
+#define MAX_FILTER 500
 #define descr 256
 //stat(path,&struct_stat) --> 0 daca exista | -1 daca nu
 //open pentru creare de fisiere
@@ -31,10 +32,10 @@ char path_cfg[MAX_PATH]="";
 char path_log[MAX_PATH]="";
 char role[MAX] = "";
 char user[MAX] = "";
-char input[MAX] = "";
+char input[MAX_FILTER] = "";
 float lat = 0,lon = 0;
 int severity = 0,severity_update = 0;
-int id = 0,id_cautat = 0;
+int id_cautat = 0;
 char description[descr] = "";
 char category[MAX] = "";
 char district[MAX] = "";
@@ -109,7 +110,7 @@ void check_read_permission(const char *path,const char *role)
 }
 void writing_in_reports()
 {
-  snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
+  
   //verificarea daca owner are drept de scriere
   check_write_permission(path_reports,role);
   struct stat st;
@@ -124,6 +125,7 @@ void writing_in_reports()
       exit(EXIT_FAILURE);
     }
   report element;
+  memset(&element, 0, sizeof(element));
   int nr_rapoarte = st.st_size / sizeof(report); //cate rapoarte exista deja
   element.id = nr_rapoarte + 1; //noul id va fi urmatorul numar
   strcpy(element.nume,user);
@@ -144,7 +146,8 @@ void writing_in_reports()
 }
 void writing_in_logged_district()
 {
-  
+
+  check_write_permission(path_log,role);
   
   //deschid fisierul pt a putea scrie in el
   int fd_log = open(path_log, O_WRONLY | O_APPEND);
@@ -289,6 +292,7 @@ void comanda_view(int id)
     exit(EXIT_FAILURE);
   }
   report element;
+  memset(&element, 0, sizeof(element));
   int gasit = 0;
   while(read(fd,&element,sizeof(report)) > 0)
   {
@@ -338,6 +342,7 @@ void comanda_list()
          exit(EXIT_FAILURE);
      }
      report element;
+     memset(&element, 0, sizeof(element));
      int count = 0;
      while(read(fd, &element, sizeof(report)) > 0) {
          printf("ID: %d | Cat: %s | Sev: %d | Inspector: %s\n", element.id, element.issue, element.severity, element.nume);
@@ -371,6 +376,7 @@ void comanda_remove()
   int total = st.st_size/sizeof(report);
 
   report element;
+  memset(&element, 0, sizeof(element));
   int i = 0;
   int target = -1;
 
@@ -391,6 +397,7 @@ void comanda_remove()
   }
   //shiftam fiecare raport
   report buffer;
+  memset(&buffer, 0, sizeof(buffer));
   for(int j = target; j < total - 1; j++)
   {
     
@@ -402,6 +409,7 @@ void comanda_remove()
   }
   ftruncate(fd, (total - 1) * sizeof(report));
   report r;
+  memset(&r, 0, sizeof(r));
   //pentru a modifica si id urile
   for(int k = 0; k < total - 1; k++)
   {
@@ -535,6 +543,7 @@ typedef struct condition
 }condition;
 void comanda_filter(char input[])
 {
+  check_read_permission(path_reports,role);
   int fd = open(path_reports,O_RDONLY);
   if(fd == -1)
   {
@@ -571,7 +580,15 @@ void comanda_filter(char input[])
    }
     if(true_false)
     {
-      comanda_view(element.id);
+       char time_str[64];
+    format_time(element.timestamp, time_str, sizeof(time_str));
+    printf("--- Detalii Raport ID: %d ---\n", element.id);
+    printf("Inspector: %s\n", element.nume);
+    printf("Coordonate: GPS(%.4f, %.4f)\n", element.lat, element.lon);
+    printf("Categorie: %s\n", element.issue);
+    printf("Severitate: %d\n", element.severity);
+    printf("Descriere: %s\n", element.description);
+    printf("Adaugat la: %s\n", time_str);
     }
   }
   close(fd);
@@ -596,12 +613,16 @@ int main(int argc,char *argv[])
         lat = atof(argv[++i]);
     if (strcmp(argv[i], "--lon") == 0)
         lon = atof(argv[++i]);
-    if (strcmp(argv[i], "--category") == 0)
-        strcpy(category, argv[++i]);
+    if (strcmp(argv[i], "--category") == 0){
+        strncpy(category, argv[++i], MAX-1);
+category[MAX-1] = '\0';
+    }
     if (strcmp(argv[i], "--severity") == 0)
         severity = atoi(argv[++i]);
-    if (strcmp(argv[i], "--description") == 0)
-        strcpy(description, argv[++i]);
+    if (strcmp(argv[i], "--description") == 0){
+       strncpy(description, argv[++i], descr-1);
+description[descr-1] = '\0';
+    }
     if(strcmp(argv[i],"--add") == 0)
 	 {
 	    strcpy(district,argv[++i]);
@@ -612,19 +633,19 @@ int main(int argc,char *argv[])
     strcpy(district, argv[++i]);
     strcpy(command, "list");
   }
-  if(strcmp(argv[i],"--view") == 0)
+  if(strcmp(argv[i],"--view") == 0 && i+2<argc)
   {
     strcpy(district, argv[++i]);
     id_cautat = atoi(argv[++i]);
     strcpy(command, "view");
   }
-  if(strcmp(argv[i],"--remove_report") == 0)
+  if(strcmp(argv[i],"--remove_report") == 0 && i+2<argc)
   {
     strcpy(district,argv[++i]);
     id_cautat = atoi(argv[++i]);
     strcpy(command,"remove_report");
   }
-  if(strcmp(argv[i],"--update_threshold") == 0)
+  if(strcmp(argv[i],"--update_threshold") == 0 && i+2<argc)
   {
     strcpy(district,argv[++i]);
     severity_update = atoi(argv[++i]);
@@ -633,12 +654,16 @@ int main(int argc,char *argv[])
   }
    if((strcmp(argv[i],"--filter") == 0) && i+2<argc)
   {
-   strcpy(district, argv[i+1]);
-   strncpy(input, argv[i+2], sizeof(input) - 1);
-   input[sizeof(input) - 1] = '\0'; // Siguranta ca se termina in NULL
-   strcpy(command, "filter");
-   i += 2; // Sarim manual peste cele doua argumente consumate
-    
+    strcpy(district, argv[i+1]);
+    strcpy(command, "filter");
+    input[0] = '\0';
+    // preluam toate conditiile ramase
+    for(int j = i+2; j < argc; j++)
+    {
+        if(j > i+2) strncat(input, " ", sizeof(input)-strlen(input)-1);
+        strncat(input, argv[j], sizeof(input)-strlen(input)-1);
+    }
+    i = argc; // am consumat tot
   }
   
       
