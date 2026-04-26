@@ -147,8 +147,10 @@ void writing_in_reports()
 void writing_in_logged_district()
 {
 
-  check_write_permission(path_log,role);
-  
+  struct stat st;
+  if(stat(path_log, &st) == -1) { perror("stat log"); exit(EXIT_FAILURE); }
+  if(!has_permission(st.st_mode, role, 'w'))
+    return;
   //deschid fisierul pt a putea scrie in el
   int fd_log = open(path_log, O_WRONLY | O_APPEND);
   if(fd_log == -1)
@@ -595,6 +597,7 @@ void comanda_filter(char input[])
 }
 int main(int argc,char *argv[])
 {
+  umask(0);
   
   for(int i = 0;i<argc;i++)
     {
