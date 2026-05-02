@@ -7,6 +7,7 @@
 #include<unistd.h> // pt close write si read
 #include<sys/types.h>
 #include<time.h> //pentru time()
+#include <sys/wait.h>
 #define MAX 100
 #define MAX_PATH 300 //pt caile fisierelor
 #define MAX_LOG 500 //pt liniile de log
@@ -279,6 +280,28 @@ void comanda_add(char district[],char role[],char user[])
 	//district/logged_district
   //acum ca am verificat daca a fost creat
   //fiecare fisier pot sa scriu in reports
+  printf("Introduceti latitudinea (ex: 45.7489): ");
+  scanf("%f", &lat);
+
+  printf("Introduceti longitudinea (ex: 21.2087): ");
+  scanf("%f", &lon);
+
+  printf("Introduceti categoria (ex: road, lighting, flooding): ");
+  scanf("%99s", category); // limitam la MAX-1
+
+  printf("Introduceti severitatea (1 = minor, 2 = moderate, 3 = critical): ");
+  scanf("%d", &severity);
+
+  
+  int c;
+  while ((c = getchar()) != '\n' && c != EOF);
+
+  printf("Introduceti descrierea problemei: ");
+  fgets(description, descr, stdin);
+  size_t len = strlen(description);
+  if (len > 0 && description[len-1] == '\n') {
+      description[len-1] = '\0';
+  }
   writing_in_reports();
   creating_the_link();
 }
@@ -595,6 +618,53 @@ void comanda_filter(char input[])
   }
   close(fd);
 }
+void comanda_remove_district()
+{
+  if(strcmp(role,"manager") != 0)
+  {
+    printf("Only manager can remove district\n");
+    exit(EXIT_FAILURE); //oprim executia daca nu e manager
+  }
+
+  pid_t s = fork();
+  if(s == -1)
+  {
+    perror("Eroare la fork");
+    exit(EXIT_FAILURE);
+  }
+  else if(s == 0)
+  {
+    //proces copil
+    char* args[] = {"rm", "-rf", district, NULL};
+    execvp("rm", args);
+    
+    //daca programul ajunge la aceasta linie, inseamna ca execvp a esuat
+    perror("Eroare la executia rm");
+    exit(EXIT_FAILURE); 
+  }
+  else
+  {
+    //proces parinte
+    int status;
+    waitpid(s, &status, 0); //am pasat adresa lui status (&status)
+
+    //asteapta sa se termine de sters directorul
+    if(WIFEXITED(status) && WEXITSTATUS(status) == 0)
+    {
+      printf("Districtul %s a fost eliminat cu succes.\n", district);
+    }
+    else
+    {
+      printf("Eroare: Nu s-a realizat stergerea districtului.\n");
+    }
+
+    //stergerea legaturii simbolice
+    char symlink_path[MAX_PATH];
+    snprintf(symlink_path, MAX_PATH, "active_reports-%s", district);
+    unlink(symlink_path);
+  }
+  return;
+}
 int main(int argc,char *argv[])
 {
   umask(0);
@@ -612,20 +682,6 @@ int main(int argc,char *argv[])
         strncpy(user, argv[++i], MAX-1);
         user[MAX-1] = '\0';
       }
-    if (strcmp(argv[i], "--lat") == 0)
-        lat = atof(argv[++i]);
-    if (strcmp(argv[i], "--lon") == 0)
-        lon = atof(argv[++i]);
-    if (strcmp(argv[i], "--category") == 0){
-        strncpy(category, argv[++i], MAX-1);
-category[MAX-1] = '\0';
-    }
-    if (strcmp(argv[i], "--severity") == 0)
-        severity = atoi(argv[++i]);
-    if (strcmp(argv[i], "--description") == 0){
-       strncpy(description, argv[++i], descr-1);
-description[descr-1] = '\0';
-    }
     if(strcmp(argv[i],"--add") == 0)
 	 {
 	    strcpy(district,argv[++i]);
@@ -668,6 +724,11 @@ description[descr-1] = '\0';
     }
     i = argc; // am consumat tot
   }
+  if(strcmp(argv[i],"--remove_district") == 0 && i+1 < argc)
+    {
+      strcpy(district, argv[++i]);
+      strcpy(command, "remove_district");
+    }
   
       
   }
@@ -701,7 +762,13 @@ if(strlen(district) > 0 && strlen(command) > 0)
   {
       comanda_filter(input);
   }
-   writing_in_logged_district();
+  if(strcmp(command,"remove_district") == 0)
+  {
+    comanda_remove_district();
+  }
+  else{
+    writing_in_logged_district();
+  }
   }
   
   return 0;
