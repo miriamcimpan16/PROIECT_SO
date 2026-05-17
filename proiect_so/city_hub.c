@@ -28,9 +28,9 @@ void start_monitor_logic() {
             close(pfd[0]); // Inchide citirea, el doar scrie
             dup2(pfd[1], STDOUT_FILENO); // Redirectioneaza output-ul in pipe
             close(pfd[1]);
-
-            execl("./monitor_reports", "./monitor_reports", NULL);
-            perror("Eroare la execl");
+            char *args[] = {"./monitor_reports",NULL};
+            execvp(args[0],args);
+            perror("Eroare la execvp");
             exit(1);
         } else {
             
@@ -58,7 +58,7 @@ void start_monitor_logic() {
         write(STDOUT_FILENO, "Monitorul ruleaza in fundal...\n", 31);
     }
 }
-void calculate_scores_logic(char list_district[]){
+void calculate_scores_logic(char district[]){
     int pfd[2];//pfd[0] -> citit pfd[1] -> scris
     if (pipe(pfd) < 0) {
         write(STDERR_FILENO, "Eroare la pipe\n", 15);
@@ -69,9 +69,23 @@ void calculate_scores_logic(char list_district[]){
     close(pfd[0]);
     dup2(pfd[1],STDOUT_FILENO); // tot ce se scrie in scorer in write ajunge in pipe
     close(pfd[1]);
+    char *args[] = {"./scorer",district,NULL};
+    execvp(args[0],args);
+    perror("Eroare la execl");
+    exit(1);
    }
    else{
+    //procesul parinte
+    close(pfd[1]);
+    char buffer[1024];
+    ssize_t n = read(pfd[0],buffer,sizeof(buffer)-1);
+    if(n > 0){
+        buffer[n] = '\0';
+        write(STDOUT_FILENO,buffer,n);
+    }
 
+    close(pfd[0]);
+    wait(NULL);
    }
 }
 int main(void) {
@@ -108,7 +122,7 @@ int main(void) {
            }
            for(int i = 0;i<nr_districte;i++)
            {
-            
+            calculate_scores_logic(list_district[i]);
            }
            
         }
