@@ -11,6 +11,7 @@
 typedef struct report
 {
   int id;
+  char role[MAX];
   char nume[MAX];
   float lat,lon;
   char issue[MAX];
@@ -18,10 +19,16 @@ typedef struct report
   time_t timestamp;
   char description[desc];
 }report;
-
+typedef struct inspector
+{
+  char nume[MAX];
+  int sev_totala;
+}inspector;
+inspector vector[MAX];
+int nr_inspectori = 0;
 int main(int argc,char *argv[])
 {
-    if(argc < 1) return 1;
+    if(argc < 2) return 1;
     char path[256];
     snprintf(path,sizeof(path),"%s/reports.dat",argv[1]);
     int fd = open(path,O_RDONLY);
@@ -33,14 +40,32 @@ int main(int argc,char *argv[])
 
     }
     report r;
-    int nr_total_sev = 0;
-    while(read(fd,&r,sizeof(report))>0)
-    {
-        nr_total_sev += r.severity;
+    while(read(fd,&r,sizeof(report))> 0){
+      int gasit = 0;
+      for(int j =0;j<nr_inspectori;j++){
+        if(strcmp(vector[j].nume,r.nume) == 0){
+          vector[j].sev_totala += r.severity;
+          gasit = 1;
+          break;
+        }
+      }
+      if(!gasit){
+        strcpy(vector[nr_inspectori].nume,r.nume);
+        vector[nr_inspectori].sev_totala = r.severity;
+        nr_inspectori++;
+      }
     }
-   char buffer[512];
-   int lungime = snprintf(buffer,sizeof(buffer),"Pentru districtul %s,scorul este %d\n",argv[1],nr_total_sev);
-   write(STDOUT_FILENO,buffer,lungime);
+   
    close(fd);
+   //afisarea rezultatelor
+    char out1[256];
+    int len1 = snprintf(out1,sizeof(out1),"Districtul:%s\n",argv[1]);
+    write(STDOUT_FILENO,out1,len1);
+    for(int j = 0;j<nr_inspectori;j++){
+    char out[256];
+    int len = snprintf(out,sizeof(out),"Inspector:%s | Severitatea totala: %d\n",
+    vector[j].nume,vector[j].sev_totala);
+    write(STDOUT_FILENO,out,len);
+   }
    return 0;
 }

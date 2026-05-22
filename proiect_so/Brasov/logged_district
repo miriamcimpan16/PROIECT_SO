@@ -1,4 +1,0 @@
-[2026-05-09 17:06:14] role = inspector user = Ion action = add-Monitor notified successfully
-[2026-05-09 17:06:57] role = inspector user = Maria action = add-Monitor notified successfully
-[2026-05-09 17:07:32] role = manager user = Alice action = add-Monitor notified successfully
-[2026-05-09 17:09:17] role = manager user = Alice action = list

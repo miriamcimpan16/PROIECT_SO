@@ -1,10 +1,1 @@
-[2026-05-09 17:08:28] role = inspector user = Bob action = add-Monitor notified successfully
-[2026-05-09 17:09:03] role = manager user = Alice action = add-Monitor notified successfully
-[2026-05-09 17:16:56] role = inspector user = Bob action = filter
-[2026-05-09 17:17:03] role = inspector user = Bob action = filter
-[2026-05-09 17:17:16] role = inspector user = Bob action = list
-[2026-05-09 17:17:38] role = inspector user = Bob action = filter
-[2026-05-09 17:17:48] role = inspector user = Bob action = filter
-[2026-05-09 17:17:54] role = inspector user = Bob action = filter
-[2026-05-09 17:18:06] role = inspector user = Bob action = filter
-[2026-05-09 17:18:12] role = inspector user = Bob action = filter
+[2026-05-22 22:12:25] role = inspector user = popescu action = add-Monitor could not be informed

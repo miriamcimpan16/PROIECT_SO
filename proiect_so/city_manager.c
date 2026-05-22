@@ -20,6 +20,7 @@
 typedef struct report
 {
   int id;
+  char role[MAX];
   char nume[MAX];
   float lat,lon;
   char issue[MAX];
@@ -113,8 +114,6 @@ void check_read_permission(const char *path,const char *role)
 void writing_in_reports()
 {
   
-  //verificarea daca owner are drept de scriere
-  check_write_permission(path_reports,role);
   struct stat st;
   if (stat(path_reports, &st) == -1) {
         perror("Eroare la obținerea dimensiunii fișierului\n");
@@ -129,6 +128,7 @@ void writing_in_reports()
   report element;
   memset(&element, 0, sizeof(element));
   int nr_rapoarte = st.st_size / sizeof(report); //cate rapoarte exista deja
+  strcpy(element.role,role);
   element.id = nr_rapoarte + 1; //noul id va fi urmatorul numar
   strcpy(element.nume,user);
   element.lat = lat; element.lon = lon;
@@ -382,7 +382,8 @@ void comanda_view(int id)
       //pt a converti time_t in string
       char *time_str = ctime(&element.timestamp);
       printf("--- Detalii Raport ID: %d ---\n", element.id);
-      printf("Inspector: %s\n", element.nume);
+      printf("Rolul: %s\n",element.role);
+      printf("Numele: %s\n", element.nume);
       printf("Coordonate: GPS(%.4f, %.4f)\n", element.lat, element.lon);
       printf("Categorie: %s\n", element.issue);
       printf("Severitate: %d\n", element.severity);
@@ -664,7 +665,8 @@ void comanda_filter(char input[])
        char time_str[64];
     format_time(element.timestamp, time_str, sizeof(time_str));
     printf("--- Detalii Raport ID: %d ---\n", element.id);
-    printf("Inspector: %s\n", element.nume);
+    printf("Rolul:%s\n",element.role);
+    printf("Nume: %s\n", element.nume);
     printf("Coordonate: GPS(%.4f, %.4f)\n", element.lat, element.lon);
     printf("Categorie: %s\n", element.issue);
     printf("Severitate: %d\n", element.severity);
@@ -676,12 +678,24 @@ void comanda_filter(char input[])
 }
 void comanda_remove_district()
 {
-  if(strcmp(role,"manager") != 0)
+  struct stat st;
+  if(stat(district, &st) == -1)
   {
-    printf("Only manager can remove district\n");
-    exit(EXIT_FAILURE); //oprim executia daca nu e manager
+    printf("District '%s' does not exist\n", district);
+    exit(EXIT_FAILURE);
   }
 
+  if(!has_permission(st.st_mode, role, 'w'))
+  {
+    printf("Role %s does not have write permission on district directory\n", role);
+    exit(EXIT_FAILURE);
+  }
+  if(strchr(district, '/') || strstr(district, ".."))
+  {
+    printf("Invalid district name: must be a simple name with no path separators or '..' components\n");
+    exit(EXIT_FAILURE);
+  }
+   
   pid_t s = fork();
   if(s == -1)
   {
