@@ -41,6 +41,10 @@ int main(int argc,char *argv[])
     }
     report r;
     while(read(fd,&r,sizeof(report))> 0){
+      //adunam scorul doar daca rolul este "inspector"
+      if (strcmp(r.role, "inspector") != 0) {
+            continue;
+      }
       int gasit = 0;
       for(int j =0;j<nr_inspectori;j++){
         if(strcmp(vector[j].nume,r.nume) == 0){

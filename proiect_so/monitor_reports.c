@@ -1,11 +1,13 @@
-#include<stdio.h>
-#include<stdint.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<fcntl.h>
-#include<signal.h>
-#include<sys/types.h> // pentru kill()
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <signal.h> 
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #define PID_FILE ".monitor_pid"
 
@@ -46,10 +48,12 @@ int main(void)
                 exit(EXIT_FAILURE); // Ne oprim aici
             }
             else{
+              //pid-ul este vechi(procesul a murit), stergem fisieru ramas orfan
               unlink(PID_FILE);
             }
         }
   }
+  //crearea fisierului PID pt noul proces
   int fd = open(PID_FILE,O_WRONLY|O_CREAT|O_TRUNC,0644);
   if(fd == -1)
     {
@@ -60,21 +64,40 @@ int main(void)
   int len = sprintf(buffer,"%d",getpid());
   write(fd,buffer,len);
   close(fd);
+  //setarea semnalelor
   struct sigaction sa;
+  memset(&sa,0,sizeof(struct sigaction)); // curatam memoria
   //sigaction(signal type, struct sigaction(new), where to return the old handler info(old))
   sa.sa_handler = handle_signal;
   sigemptyset(&sa.sa_mask); //nu avem semnale blocate in timpul functiei handle_signal
-  sa.sa_flags = 0;
-
- sigaction(SIGUSR1, &sa, NULL);
- sigaction(SIGINT, &sa, NULL);
+  sa.sa_flags = SA_RESTART; //previne intreruperea altor apeluri de sistem
+  //verificam daca legarea semnalului a reusit
+ if(sigaction(SIGUSR1, &sa, NULL) < 0)
+ {
+     perror("Eroare la sigaction pentru SIGUSR1");
+     unlink(PID_FILE);
+     exit(EXIT_FAILURE);
+ }
+ //SIGINT
+ struct sigaction sa_int;
+    memset(&sa_int, 0, sizeof(struct sigaction));
+    sa_int.sa_handler = handle_signal;
+    sigemptyset(&sa_int.sa_mask);
+    sa_int.sa_flags = 0;
+    //verificam daca legarea semnalului a reusit
+    if(sigaction(SIGINT, &sa, NULL) < 0)
+    {
+        perror("Eroare la sigaction pentru SIGINT");
+        unlink(PID_FILE);
+        exit(EXIT_FAILURE);
+    }
 
  const char msg[] = "STATUS:Monitor activ. Asteapta SIGUSR1/SIGINT.\n"; 
  write(STDOUT_FILENO,msg,sizeof(msg) - 1);
 
- while (1) {
-pause(); 
-}
+   while (1) {
+  pause(); 
+   }
 
  
   return 0;

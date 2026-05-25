@@ -25,7 +25,7 @@ typedef struct report
   float lat,lon;
   char issue[MAX];
   int severity;
-  time_t timestamp;
+  time_t timestamp; //numarul de secunde
   char description[descr];
 }report;
 //path-urile o sa le pun ca variabile globale
@@ -42,24 +42,37 @@ int id_cautat = 0;
 char description[descr] = "";
 char category[MAX] = "";
 char district[MAX] = "";
+//functie ce interpreteaza modeul UNIX de permisiuni
 int has_permission(mode_t mode,const char *role,char type)
 {
+  //verificam permisiunile pt owner
+  //folosim masti binare de standardul POSIX
   if(strcmp(role,"manager") == 0)
     {
       if (type == 'r') return mode & S_IRUSR;
+      //S_IRUSR -> owner read 100 000 000
       if (type == 'w') return mode & S_IWUSR;
+      //S_IWUSR-> owner write 010 000 000
       if (type == 'x') return mode & S_IXUSR;
+      //S_IXUSR->owner execute 001 000 000
     }
+  //verificam permisiunile pt group
   if (strcmp(role, "inspector") == 0) {
         if (type == 'r') return mode & S_IRGRP;
+        //000 100 000
         if (type == 'w') return mode & S_IWGRP;
+        //000 010 000
         if (type == 'x') return mode & S_IXGRP;
+        //000 001 000
     }
   return 0;
 }
 //transformarea bitilor in text
+//in format de genu rwxrwxrwx
 void mode_to_string(mode_t mode,char *str)
 {
+  //construirea string-ului
+  //str in varianta de default --- --- ---
   strcpy(str,"---------");
   //pentru owner
   if(mode & S_IRUSR) str[0] = 'r';
@@ -80,10 +93,14 @@ void mode_to_string(mode_t mode,char *str)
 }
 void format_time(time_t t,char *buf,size_t len)
 {
+  //time_t > struct tm-> string final
   //pentru a transforma variabila timp intr o data pe an luna zi ora minut..
   struct tm *tm_info = localtime(&t);
+  //tm are campurile: tm_year,tm_mon...
   //formateaza intr un string care nu depaseste len
   strftime(buf,len,"%Y-%m-%d %H:%M:%S",tm_info);
+  //localtime() -> sparge timpul in componente
+  //strftime() -> transforma componentele in text
 }
 void check_write_permission(const char *path, const char *role) {
     struct stat st;
@@ -103,6 +120,7 @@ void check_read_permission(const char *path,const char *role)
   struct stat st;
   if(stat(path,&st) == -1){
     printf("eroare la citire");
+    //fisierul nu exista->nu poate fi accesat->metadata nu poate fi citita
     exit(EXIT_FAILURE);
   }
   if(!has_permission(st.st_mode,role,'r'))
@@ -119,14 +137,22 @@ void writing_in_reports()
         perror("Eroare la obținerea dimensiunii fișierului\n");
         exit(EXIT_FAILURE);
     }
+  if((st.st_mode & 0777) != 0664)
+    {
+        printf("Atentie: permisiunile lui reports.dat au fost modificate!\n");
+        exit(EXIT_FAILURE);
+    }
   int fd  = open(path_reports,O_WRONLY|O_APPEND);
+  //O_WRONLY pentru scriere si 0_APPEND pentru adaugare la final
+  //->orice write merge automat la finalul fisierului 
+  //fara sa fac lseek(fd,0,SEEK_END)->muta pointerul intern la final
   if(fd == -1)
     {
       printf("Eroare la deschiderea fisierului\n");
       exit(EXIT_FAILURE);
     }
   report element;
-  memset(&element, 0, sizeof(element));
+  memset(&element, 0, sizeof(element)); //pentru a curata memoria
   int nr_rapoarte = st.st_size / sizeof(report); //cate rapoarte exista deja
   strcpy(element.role,role);
   element.id = nr_rapoarte + 1; //noul id va fi urmatorul numar
@@ -134,7 +160,7 @@ void writing_in_reports()
   element.lat = lat; element.lon = lon;
   strcpy(element.issue, category);
   element.severity = severity;
-  element.timestamp = time(NULL);
+  element.timestamp = time(NULL); // salveaza momentul cand s a creat raportul
   strcpy(element.description, description);
  
   if((write(fd,&element,sizeof(element)) == -1))
@@ -191,6 +217,12 @@ void writing_in_logged_district(int monitor_notified)
     perror("stat log"); 
     exit(EXIT_FAILURE);
   }
+   // verificam ca permisiunile nu au fost modificate
+    if((st.st_mode & 0777) != 0644)
+    {
+        printf("Atentie: permisiunile lui logged_district au fost modificate!\n");
+        exit(EXIT_FAILURE);
+    }
   //deschid fisierul pt a putea scrie in el
   int fd_log = open(path_log, O_WRONLY | O_APPEND);
   if(fd_log == -1)
@@ -219,14 +251,13 @@ void writing_in_logged_district(int monitor_notified)
   close(fd_log);
 
 }
+//numele districtului
+//CREARE FISIERULUI REPORTS.DAT
 void creare_reports(char district[])
 {
   
-  //CREARE FISIERULUI REPORTS.DAT
-      
-  snprintf(path_reports,MAX_PATH,"%s/reports.dat",district);
   int fd = open(path_reports,O_CREAT | O_RDWR|O_EXCL,0664);
-      //O_CREAT-> spune daca fisierul exista sau nu, daca nu exista este create
+      //O_CREAT-> spune daca fisierul exista sau nu, daca nu exista este creat
       //O_RDWR->deschide fisierul pentru citire si pentru scriere
       //O_EXCL -> esueaza daca fisierul exista deja
   if(fd == -1)
@@ -234,10 +265,11 @@ void creare_reports(char district[])
 	  printf("Eroare la crearea fisierului reports.dat\n");
 	  exit(EXIT_FAILURE);
 	}
-  close(fd);
+  close(fd);//pentru a evita file descriptor leak/consum de resurse
   if(chmod(path_reports,0664) == -1){
     perror("eroare la chmod reports.dat");
   }
+  //fortare exacta a permisiunilor
    // pun permsiunile inca odata, desi le am pus la open, pt sigurata,deoarece pot fi modificate de catre sistem
 
  
@@ -247,8 +279,8 @@ void creare_district(char district[])
  
   //CREAREA FISIERULUI DISTRICT.CFG
       
-  snprintf(path_cfg, MAX_PATH, "%s/district.cfg", district); 
-  int fd = open(path_cfg, O_CREAT | O_RDWR, 0640);
+  
+  int fd = open(path_cfg, O_CREAT | O_RDWR | O_EXCL, 0640);
   if(fd == -1) {
 	printf("Eroare la crearea district.cfg\n"); 
 	exit(EXIT_FAILURE);
@@ -262,8 +294,8 @@ void creare_logged(char district[])
  
     //CREAREA FISIERULUI LOGGED_DISTRICT
       
-  snprintf(path_log, MAX_PATH, "%s/logged_district", district);
-  int fd = open(path_log, O_CREAT | O_RDWR, 0644);
+  
+  int fd = open(path_log, O_CREAT | O_RDWR | O_EXCL, 0644);
   if (fd == -1)
     {
       printf("Eroare la crearea fisierului logged_district");
@@ -275,21 +307,24 @@ void creare_logged(char district[])
 }
 void creating_the_link()
 {
-  //cream numele legaturii
+  //1.cream numele legaturii
   char symlink_path[MAX_PATH];
   snprintf(symlink_path,MAX_PATH,"active_reports-%s",district);
-  struct stat lst;
-  struct stat target_st;
-  //verificam cu lstat() daca leg simbolica exista
+  //structuri pentru verificari
+  struct stat lst; //retine info despre link
+  struct stat target_st;//retine info despre fisierului catre care pointeaza
+  //2.verificam cu lstat() daca leg simbolica exista
   if(lstat(symlink_path,&lst) == 0)
   {
-    //daca am ajuns aici, exista
-    //cu stat verificam daca destinatia ei exista
+    //daca am ajuns aici, link ul exista
+    //3.cu stat verificam daca destinatia ei exista
+    //pt a detecta dangling links
     if(stat(symlink_path,&target_st) == -1)
     {
       //destinatia nu mai exista
       printf("Legatura simbolica '%s' este dangling(destinatia nu mai exista)",symlink_path);
-      unlink(symlink_path); //stergem legatura si apoi o refacem
+      unlink(symlink_path); //stergem legatura
+      //cream o legatura corecta
       if(symlink(path_reports,symlink_path) == -1)
       {
         printf("Eroare la recrearea legaturii simbolice\n");
@@ -298,7 +333,8 @@ void creating_the_link()
     }
   }
     else{
-      //daca am ajuns aici, legatura nu exista deloc
+      //4.daca am ajuns aici, legatura nu exista deloc
+      //atunci o creeam
       if(symlink(path_reports,symlink_path) == -1)
       {
         printf("Eroare la crearea legaturii simbolice\n");
@@ -309,18 +345,22 @@ void creating_the_link()
 }
 void comanda_add(char district[],char role[],char user[])
 {
-  struct stat st;
-  if(stat(district,&st) == -1)
+  struct stat st; // in st o sa se salveze informatii despre fisier
+  //verific cu stat fisierul exista(0-da -1-nu)
+  //se salveaza in st info despre fisierul de la path(district)
+  if(stat(district,&st) == -1) 
     {
       //folderul-->cu permisiunile: 0750
-      if((mkdir(district,0750)) == -1)
+      if((mkdir(district,0750)) == -1) // pentru director
 	{
 	  printf("Eroare la crearea dosarului\n");
 	  exit(EXIT_FAILURE);
 	}
-  chmod(district,0750);
+  chmod(district,0750); // setez permisiunile
   } 
+
   //verificam fiecare fisier daca este creat sau nu
+  //daca nu exista il creez
   if(stat(path_reports, &st) == -1) {
       creare_reports(district);
   }
@@ -335,6 +375,7 @@ void comanda_add(char district[],char role[],char user[])
 	//district/logged_district
   //acum ca am verificat daca a fost creat
   //fiecare fisier pot sa scriu in reports
+  //folosesc scanf si fgets doar pentru inputul de la tastatura
   printf("Introduceti latitudinea (ex: 45.7489): ");
   scanf("%f", &lat);
 
@@ -380,15 +421,17 @@ void comanda_view(int id)
     if(element.id == id)
     {
       //pt a converti time_t in string
-      char *time_str = ctime(&element.timestamp);
+      char time_str[64];
+      format_time(element.timestamp, time_str, sizeof(time_str));
       printf("--- Detalii Raport ID: %d ---\n", element.id);
       printf("Rolul: %s\n",element.role);
       printf("Numele: %s\n", element.nume);
       printf("Coordonate: GPS(%.4f, %.4f)\n", element.lat, element.lon);
+      //float doar cu 4 zecimale
       printf("Categorie: %s\n", element.issue);
       printf("Severitate: %d\n", element.severity);
       printf("Descriere: %s\n", element.description);
-      printf("Adaugat la: %s", time_str);
+      printf("Adaugat la: %s\n", time_str);
       gasit = 1;
       break;
     }
@@ -403,8 +446,8 @@ void comanda_list()
 { 
      struct stat st;
      char perm_str[MAX];
-     //extragerea datelor
      check_read_permission(path_reports,role);
+     //managerul,inspectorul,others pot citi din raport
      if(stat(path_reports,&st) == -1)
      {
       printf("eroare la citirea datelor");
@@ -413,6 +456,7 @@ void comanda_list()
      mode_to_string(st.st_mode,perm_str);
      //ultima modificare
      char time_str[64];
+     //st.st_mtime->modification time
      format_time(st.st_mtime,time_str,sizeof(time_str));
      printf("FISIER: %s\nPERMISIUNI: %s\nDIMENSIUNE: %ld bytes\nULTIMA MODIFICARE: %s\n",
     path_reports,perm_str,st.st_size,time_str
@@ -423,9 +467,10 @@ void comanda_list()
          perror("Eroare la deschidere reports.dat");
          exit(EXIT_FAILURE);
      }
-     report element;
+     report element;//aici se pun datele citite
      memset(&element, 0, sizeof(element));
-     int count = 0;
+     //pt curatarea memoriei
+     int count = 0;//numara cate rapoarte gasesc
      while(read(fd, &element, sizeof(report)) > 0) {
          printf("ID: %d | Cat: %s | Sev: %d | Inspector: %s\n", element.id, element.issue, element.severity, element.nume);
          count++;
@@ -436,17 +481,21 @@ void comanda_list()
      }
 
      close(fd);
+     //eliberez file descriptorul
 
 }
 void comanda_remove()
 {
   check_write_permission(path_reports,role);
+  //doar managerul poate sa stearga rapoarte
   if(strcmp(role,"manager") != 0)
   {
     printf("Only the manager can remove a report");
     exit(EXIT_FAILURE);
   }
   int fd = open(path_reports,O_RDWR);
+  //O_RDWR -> citire + scriere
+  //citesc rapoartele, apoi rescriu fisierul
   if(fd == -1)
   {
     printf("eroare la deschiderea fisierului in functia remove\n");
@@ -455,7 +504,7 @@ void comanda_remove()
   //numarul total de rapoarte
   struct stat st;
   stat(path_reports,&st);
-  int total = st.st_size/sizeof(report);
+  int total = st.st_size/sizeof(report); 
 
   report element;
   memset(&element, 0, sizeof(element));
@@ -466,7 +515,7 @@ void comanda_remove()
   {
     if(element.id == id_cautat)
     {
-      target = i;
+      target = i; // salvez pozitia raportului care trebe eliminat
       break;
     }
     i++;
@@ -479,7 +528,7 @@ void comanda_remove()
   }
   //shiftam fiecare raport
   report buffer;
-  memset(&buffer, 0, sizeof(buffer));
+  memset(&buffer, 0, sizeof(buffer)); // curatarea memoriei
   for(int j = target; j < total - 1; j++)
   {
     
@@ -489,17 +538,18 @@ void comanda_remove()
     lseek(fd, j * sizeof(report), SEEK_SET);
     write(fd, &buffer, sizeof(report));
   }
-  ftruncate(fd, (total - 1) * sizeof(report));
+  ftruncate(fd, (total - 1) * sizeof(report)); 
+  //reduc dimensiunea fisierului la numarul total de rapoarte
   report r;
-  memset(&r, 0, sizeof(r));
+  memset(&r, 0, sizeof(r)); // curatam din nou memoria
   //pentru a modifica si id urile
   for(int k = 0; k < total - 1; k++)
   {
-    lseek(fd, k * sizeof(report), SEEK_SET);
-    read(fd, &r, sizeof(report));
-    r.id = k + 1;
-    lseek(fd, k * sizeof(report), SEEK_SET);
-    write(fd, &r, sizeof(report));
+    lseek(fd, k * sizeof(report), SEEK_SET); //pun cursorul la inceputul raportului l
+    read(fd, &r, sizeof(report)); // fct read copiaza datele in r, iar cursorul a avansat
+    r.id = k + 1; // se modifica id ul
+    lseek(fd, k * sizeof(report), SEEK_SET); //ma intorc din nou la raportul ce a fost modificat
+    write(fd, &r, sizeof(report)); // il scriu unde trebuie
   }
   close(fd);
   printf("Raportul cu ID %d a fost sters.\n", id_cautat);
@@ -508,6 +558,7 @@ void comanda_remove()
 }
 void comanda_update_threshold()
 {
+  //verificam rolul
   if(strcmp(role,"manager") != 0)
   {
     printf("Only the manager can update");
@@ -519,6 +570,7 @@ void comanda_update_threshold()
     printf("eroare la stat district.cfg");
     exit(EXIT_FAILURE);
   }
+  //verific permisiunile
   if((st.st_mode & 0777) != 0640)
   {
     printf("the permissions are not correct");
@@ -547,7 +599,7 @@ void comanda_update_threshold()
 int parse_condition(const char *input, char *field, char *op, char *value) {
     // Curatam variabilele
     field[0] = '\0'; op[0] = '\0'; value[0] = '\0';
-    
+    //pentru ca am const copiez inputul intr un buffer
     char buffer[256];
     strncpy(buffer, input, sizeof(buffer) - 1);
     buffer[sizeof(buffer) - 1] = '\0';
@@ -626,6 +678,10 @@ typedef struct condition
 void comanda_filter(char input[])
 {
   check_read_permission(path_reports,role);
+  if(strlen(input) == 0){
+    printf("Eroare:nu ai specificat nicio conditie.\n");
+    return;
+  }
   int fd = open(path_reports,O_RDONLY);
   if(fd == -1)
   {
@@ -738,8 +794,9 @@ void comanda_remove_district()
 
 int main(int argc,char *argv[])
 {
-  umask(0);
-  
+  umask(0); 
+  //pentru a ramane permisunile exacte din open() mkdir() chmod()
+  //permisiunea finala = permisiunea_ceruta - umask
   for(int i = 0;i<argc;i++)
     {
   if((i+1) < argc){
@@ -756,7 +813,7 @@ int main(int argc,char *argv[])
     if(strcmp(argv[i],"--add") == 0)
 	 {
 	    strcpy(district,argv[++i]);
-	  strcpy(command,"add");
+	    strcpy(command,"add");
 	 }
    if(strcmp(argv[i],"--list") == 0)
   {
